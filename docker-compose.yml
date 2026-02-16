@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  proxy:
+    build: .
+    container_name: antigravity-claude-proxy
+    ports:
+      # Main application port specified by user
+      - "8082:8082"
+      # OAuth callback port - REQUIRED for Google Sign-In to work from host browser
+      - "51121:51121"
+      # Fallback ports for OAuth (optional but recommended)
+      - "51122:51122"
+      - "51123:51123"
+    environment:
+      - PORT=8082
+      - HOST=0.0.0.0
+      - OAUTH_CALLBACK_PORT=51121
+    volumes:
+      # Persist account configuration and credentials
+      - antigravity_config:/root/.config/antigravity-proxy
+    restart: unless-stopped
+
+volumes:
+  antigravity_config:
