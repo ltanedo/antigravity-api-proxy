@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 
+# Local npm cache for offline Docker builds (see Dockerfile)
+.npm-cache/
+
 # OS files
 .DS_Store
 Thumbs.db

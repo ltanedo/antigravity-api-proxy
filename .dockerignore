@@ -1,0 +1,31 @@
+# Compiled dependencies — always reinstalled fresh inside the container.
+# Prevents Windows-compiled native modules (better-sqlite3) from overwriting
+# the Linux-compiled ones installed by npm ci inside the container.
+node_modules/
+
+# Version control
+.git/
+.gitignore
+
+# Dev tooling & local config
+.env
+.env.*
+*.local
+
+# Test suite (not needed at runtime)
+tests/
+
+# Documentation & images
+docs/
+images/
+*.md
+
+# Editor artifacts
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# NOTE: .npm-cache/ is intentionally NOT excluded — the Dockerfile
+# explicitly COPYs it to /tmp/npm-cache for offline npm ci.
+

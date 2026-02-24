@@ -1,10 +1,12 @@
-FROM node:22-slim
+FROM mcr.microsoft.com/devcontainers/javascript-node:22
 
-# Install dependencies for native modules (better-sqlite3)
+# Install CA certificates and build dependencies for native modules (better-sqlite3)
 RUN apt-get update && apt-get install -y \
+    ca-certificates \
     python3 \
     make \
     g++ \
+    && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -12,15 +14,20 @@ WORKDIR /app
 # Copy package files first to leverage Docker cache
 COPY package*.json ./
 
-# Install production dependencies
-# use --ignore-scripts to prevent 'prepare' script from running (which fails because source files aren't copied yet)
-RUN npm ci --ignore-scripts
+# Copy pre-downloaded npm cache from host (run `npm ci --cache .npm-cache` on host first)
+COPY .npm-cache /tmp/npm-cache
+
+# Install from local cache — no npm registry access needed inside the container.
+# --prefer-offline: use cached tarballs; only hits network if a package is missing from cache.
+# --ignore-scripts: skip 'prepare' (build:css) since source files aren't copied yet.
+# Native modules (better-sqlite3) compile from source inside the container using the build tools above.
+RUN npm ci --cache /tmp/npm-cache --prefer-offline --ignore-scripts
 
 # Copy the rest of the application code
 COPY . .
 
-# Rebuild native modules (since we ignored scripts) and build CSS
-RUN npm rebuild && npm run build:css
+# Build CSS (native modules already compiled by npm ci)
+RUN npm run build:css
 
 # Create directory for config persistence
 RUN mkdir -p /root/.config/antigravity-proxy

@@ -33,7 +33,7 @@ function getAntigravityDbPath() {
 export function getPlatformUserAgent() {
     const os = platform();
     const architecture = arch();
-    return `antigravity/1.16.5 ${os}/${architecture}`;
+    return `antigravity/1.18.4 ${os}/${architecture}`;
 }
 
 // IDE Type enum (numeric values as expected by Cloud Code API)
