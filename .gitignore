@@ -15,6 +15,7 @@ src-tauri/target
 proxy-home
 proxy-app/.config
 proxy-app/data
+bundled-runtime/
 
 # Editor directories and files
 .vscode/*

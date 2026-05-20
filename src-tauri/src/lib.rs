@@ -13,6 +13,11 @@ use tauri::{
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
+const BUNDLED_RUNTIME_DIR: &str = "bundled-runtime";
+#[cfg(target_os = "windows")]
+const BUNDLED_NODE_BINARY: &str = "node.exe";
+#[cfg(not(target_os = "windows"))]
+const BUNDLED_NODE_BINARY: &str = "node";
 const PROXY_PORT: &str = "8086";
 const OAUTH_CALLBACK_PORT: &str = "38080";
 const DASHBOARD_URL: &str = "http://127.0.0.1:8086/";
@@ -36,6 +41,27 @@ fn proxy_source_dir(app: &tauri::AppHandle) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("proxy-app")
+}
+
+fn bundled_node_path(app: &tauri::AppHandle) -> Option<PathBuf> {
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let bundled = resource_dir
+            .join(BUNDLED_RUNTIME_DIR)
+            .join(BUNDLED_NODE_BINARY);
+        if bundled.exists() {
+            return Some(bundled);
+        }
+    }
+
+    let local = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join(BUNDLED_RUNTIME_DIR)
+        .join(BUNDLED_NODE_BINARY);
+    if local.exists() {
+        return Some(local);
+    }
+
+    None
 }
 
 fn proxy_home_dir(app: &tauri::AppHandle) -> Result<PathBuf> {
@@ -66,8 +92,9 @@ fn start_proxy(app: &tauri::AppHandle) -> Result<Child> {
     let logs_dir = home_dir.join("logs");
     let stdout = log_file(&logs_dir.join("proxy.log"))?;
     let stderr = log_file(&logs_dir.join("proxy-error.log"))?;
+    let node_path = bundled_node_path(app).unwrap_or_else(|| PathBuf::from("node"));
 
-    let mut command = Command::new("node");
+    let mut command = Command::new(&node_path);
     command
         .current_dir(&proxy_dir)
         .arg(proxy_dir.join("src").join("index.js"))
@@ -88,7 +115,9 @@ fn start_proxy(app: &tauri::AppHandle) -> Result<Child> {
         command.creation_flags(CREATE_NO_WINDOW);
     }
 
-    command.spawn().context("failed to launch bundled proxy with node")
+    command
+        .spawn()
+        .with_context(|| format!("failed to launch bundled proxy with {}", node_path.display()))
 }
 
 fn stop_proxy(app: &tauri::AppHandle) {
