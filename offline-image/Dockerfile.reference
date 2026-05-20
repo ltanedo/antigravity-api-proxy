@@ -1,0 +1,14 @@
+FROM node:22-bookworm-slim
+
+ENV NODE_ENV=production \
+    HOME=/data \
+    HOST=0.0.0.0 \
+    PORT=8080 \
+    OAUTH_CALLBACK_PORT=38080
+
+COPY app/ /app/
+
+VOLUME ["/data"]
+EXPOSE 8080 38080
+
+ENTRYPOINT ["node", "/app/src/index.js"]
