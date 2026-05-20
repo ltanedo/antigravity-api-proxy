@@ -42,11 +42,19 @@ npm install
 npm run build
 ```
 
-That build command also installs the bundled proxy runtime dependencies inside `proxy-app/`.
+Build flow:
+
+- `npm install` installed the root Tauri build dependency.
+- `npm run build` ran `npm run proxy:install` first, which installed production dependencies inside `proxy-app/`.
+- `npm run build` then ran `tauri build` to produce the Windows executable and installer bundles.
 
 Windows bundle output:
 
-- `src-tauri\target\release\bundle\`
+- Raw app executable: `src-tauri\target\release\antigravity-proxy-tray.exe`
+- NSIS setup executable: `src-tauri\target\release\bundle\nsis\Antigravity Proxy Tray_<version>_x64-setup.exe`
+- MSI installer: `src-tauri\target\release\bundle\msi\Antigravity Proxy Tray_<version>_x64_en-US.msi`
+
+Current packaging assumes `node` is already available on the target Windows machine.
 
 ## Dev on Windows
 
@@ -55,10 +63,59 @@ npm install
 npm run dev
 ```
 
-## Notes for the next agent
+## First Run on Windows
 
-- The Tauri tray entry point is [src-tauri/src/lib.rs](src-tauri/src/lib.rs).
-- Hidden-window and resource bundling config lives in [src-tauri/tauri.conf.json](src-tauri/tauri.conf.json).
-- The only intentional upstream proxy code change is the guarded DB fallback in [proxy-app/src/account-manager/index.js](proxy-app/src/account-manager/index.js).
-- If you want the packaged app to be fully standalone, the next likely step is bundling a Windows Node runtime or switching the child runtime strategy.
-- This repo currently assumes `node` is already present on the Windows machine.
+After launching the app, use the local dashboard to authenticate:
+
+1. Start the tray app.
+2. Open `http://127.0.0.1:8086/#accounts`
+3. Click **Add Account**
+4. Complete the Google OAuth flow in your browser
+5. Return to the dashboard once the account appears
+
+Notes:
+
+- The main dashboard and local Anthropic-compatible API run on `http://127.0.0.1:8086/`
+- The OAuth callback temporarily listens on `http://127.0.0.1:38080/oauth-callback`
+- `38080` is only used during the auth flow
+
+## Local API Examples
+
+Once authenticated, the tray app exposes the local proxy on `http://127.0.0.1:8086/`.
+
+List available models:
+
+```powershell
+curl.exe -sS http://127.0.0.1:8086/v1/models
+```
+
+Send an Anthropic-style test request to `gemini-3.1-pro-low`:
+
+```powershell
+@'
+{"model":"gemini-3.1-pro-low","max_tokens":128,"messages":[{"role":"user","content":"Reply with exactly: test ok"}]}
+'@ | Set-Content -NoNewline anthropic-test.json
+
+curl.exe -sS -X POST http://127.0.0.1:8086/v1/messages `
+  -H "content-type: application/json" `
+  -H "anthropic-version: 2023-06-01" `
+  --data-binary @anthropic-test.json
+```
+
+Expected response shape:
+
+```json
+{
+  "type": "message",
+  "role": "assistant",
+  "model": "gemini-3.1-pro-low",
+  "content": [
+    {
+      "type": "text",
+      "text": "test ok"
+    }
+  ]
+}
+```
+
+If you later configure `apiKey` for the proxy, add an `x-api-key` header to `/v1/*` requests.
