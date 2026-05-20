@@ -1,14 +1,15 @@
 {
   "name": "antigravity-proxy-tray",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
-    "check": "cargo check --manifest-path src-tauri/Cargo.toml",
+    "runtime:stage": "node scripts/stage-node-runtime.mjs",
+    "check": "npm run runtime:stage && cargo check --manifest-path src-tauri/Cargo.toml",
     "proxy:install": "npm --prefix proxy-app ci --omit=dev --ignore-scripts",
-    "dev": "npm run proxy:install && tauri dev",
-    "build": "npm run proxy:install && tauri build",
-    "build:debug": "npm run proxy:install && tauri build --debug",
+    "dev": "npm run runtime:stage && npm run proxy:install && tauri dev",
+    "build": "npm run runtime:stage && npm run proxy:install && tauri build",
+    "build:debug": "npm run runtime:stage && npm run proxy:install && tauri build --debug",
     "tauri": "tauri"
   },
   "devDependencies": {
