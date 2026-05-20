@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Antigravity Proxy Tray</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        background:
+          radial-gradient(circle at top left, rgba(255, 183, 94, 0.3), transparent 40%),
+          linear-gradient(135deg, #10151f, #1b2739 60%, #121921);
+        color: #eef4ff;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+      }
+
+      main {
+        width: min(340px, calc(100vw - 32px));
+        padding: 24px;
+        border-radius: 18px;
+        background: rgba(12, 18, 28, 0.82);
+        box-shadow: 0 22px 60px rgba(0, 0, 0, 0.35);
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 1.2rem;
+      }
+
+      p {
+        margin: 0;
+        line-height: 1.5;
+        color: rgba(238, 244, 255, 0.8);
+      }
+
+      code {
+        font-family: "SFMono-Regular", Consolas, monospace;
+        color: #ffd18a;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Antigravity Proxy Tray</h1>
+      <p>
+        This window stays hidden during normal use. The proxy launches in the system tray and serves the
+        dashboard at <code>http://127.0.0.1:8086/</code>.
+      </p>
+    </main>
+  </body>
+</html>
