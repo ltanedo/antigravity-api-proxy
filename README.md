@@ -5,7 +5,7 @@ Tray-first Windows packaging work for `antigravity-claude-proxy`, kept in a publ
 ## What this repo is
 
 - A Tauri system-tray wrapper around the Antigravity proxy.
-- The tray app launches the bundled proxy with a packaged Node runtime.
+- The tray app launches the bundled proxy with a packaged Bun runtime.
 - The proxy serves the dashboard and Anthropic-compatible API on `http://127.0.0.1:8086/`.
 - The Google OAuth callback listener uses `http://127.0.0.1:38080/oauth-callback`.
 
@@ -32,6 +32,7 @@ Tray-first Windows packaging work for `antigravity-claude-proxy`, kept in a publ
 Prereqs:
 
 - `node` available on `PATH`
+- `bun` available on `PATH`
 - Rust installed through `rustup`
 - normal Windows desktop environment for Tauri builds
 
@@ -44,7 +45,7 @@ npm run build
 
 Build flow:
 
-- `npm run runtime:stage` copies the active `node.exe` and Node license into `bundled-runtime/` for packaging.
+- `npm run runtime:stage` copies the active `bun.exe` into `bundled-runtime/` for packaging.
 - `npm install` installed the root Tauri build dependency.
 - `npm run build` ran `npm run proxy:install` first, which installed production dependencies inside `proxy-app/`.
 - `npm run build` then ran `tauri build` to produce the Windows executable and installer bundles.
@@ -55,7 +56,7 @@ Windows bundle output:
 - NSIS setup executable: `src-tauri\target\release\bundle\nsis\Antigravity Proxy Tray_<version>_x64-setup.exe`
 - MSI installer: `src-tauri\target\release\bundle\msi\Antigravity Proxy Tray_<version>_x64_en-US.msi`
 
-The packaged app includes its own Node runtime, so end users do not need to install Node separately.
+The packaged app includes its own Bun runtime, so end users do not need to install Bun or Node separately.
 
 ## Dev on Windows
 
