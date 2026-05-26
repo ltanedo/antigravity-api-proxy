@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/antigravity-claude-proxy.svg)](https://www.npmjs.com/package/antigravity-claude-proxy)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A proxy server that exposes an **Anthropic-compatible API** backed by **Antigravity's Cloud Code**, letting you use Claude and Gemini models with **Claude Code CLI** and **OpenClaw / ClawdBot**.
+A proxy server that exposes an **Anthropic-compatible API** and an **OpenAI-compatible Chat Completions API** backed by **Antigravity's Cloud Code**, letting you use Claude and Gemini models with **Claude Code CLI**, **OpenClaw / ClawdBot**, and OpenAI-compatible clients.
 
 ![Antigravity Claude Proxy Banner](images/banner.png)
 
@@ -37,7 +37,7 @@ A proxy server that exposes an **Anthropic-compatible API** backed by **Antigrav
 └──────────────────┘     └─────────────────────┘     └────────────────────────────┘
 ```
 
-1. Receives requests in **Anthropic Messages API format**
+1. Receives requests in **Anthropic Messages API format** or **OpenAI Chat Completions format**
 2. Uses OAuth tokens from added Google accounts (or Antigravity's local database)
 3. Transforms to **Google Generative AI format** with Cloud Code wrapping
 4. Sends to Antigravity's Cloud Code API
