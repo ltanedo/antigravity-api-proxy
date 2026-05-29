@@ -6,7 +6,7 @@ Tray-first Windows packaging work for `antigravity-claude-proxy`, kept in a publ
 
 - A Tauri system-tray wrapper around the Antigravity proxy.
 - The tray app launches the bundled proxy with a packaged Bun runtime.
-- The proxy serves the dashboard and Anthropic-compatible API on `http://127.0.0.1:8086/`.
+- The proxy serves the dashboard, Anthropic-compatible API, and OpenAI-compatible Chat Completions API on `http://127.0.0.1:8086/`.
 - The Google OAuth callback listener uses `http://127.0.0.1:38080/oauth-callback`.
 
 ## Repo layout
@@ -77,7 +77,7 @@ After launching the app, use the local dashboard to authenticate:
 
 Notes:
 
-- The main dashboard and local Anthropic-compatible API run on `http://127.0.0.1:8086/`
+- The main dashboard, local Anthropic-compatible API, and local OpenAI-compatible Chat Completions API run on `http://127.0.0.1:8086/`
 - The OAuth callback temporarily listens on `http://127.0.0.1:38080/oauth-callback`
 - `38080` is only used during the auth flow
 
@@ -121,3 +121,31 @@ Expected response shape:
 ```
 
 If you later configure `apiKey` for the proxy, add an `x-api-key` header to `/v1/*` requests.
+
+Send an OpenAI-style Chat Completions request to the same local proxy:
+
+```powershell
+@'
+{"model":"gemini-3.1-pro-low","messages":[{"role":"user","content":"Reply with exactly: openai ok"}],"max_tokens":128}
+'@ | Set-Content -NoNewline openai-test.json
+
+curl.exe -sS -X POST http://127.0.0.1:8086/v1/chat/completions `
+  -H "content-type: application/json" `
+  --data-binary @openai-test.json
+```
+
+Expected response shape:
+
+```json
+{
+  "object": "chat.completion",
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "content": "openai ok"
+      }
+    }
+  ]
+}
+```
