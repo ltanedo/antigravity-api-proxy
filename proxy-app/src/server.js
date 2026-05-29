@@ -21,6 +21,13 @@ import { clearThinkingSignatureCache } from './format/signature-cache.js';
 import { formatDuration } from './utils/helpers.js';
 import { logger } from './utils/logger.js';
 import usageStats from './modules/usage-stats.js';
+import {
+    buildOpenAIErrorPayload,
+    convertAnthropicStreamEventToOpenAIChunks,
+    convertAnthropicToOpenAI,
+    convertOpenAIToAnthropic,
+    createOpenAIStreamState
+} from './compat/openai.js';
 
 // Parse fallback flag directly from command line args to avoid circular dependency
 const args = process.argv.slice(2);
@@ -98,13 +105,13 @@ app.use('/v1', (req, res, next) => {
 
     if (!providedKey || providedKey !== config.apiKey) {
         logger.warn(`[API] Unauthorized request from ${req.ip}, invalid API key`);
-        return res.status(401).json({
-            type: 'error',
-            error: {
-                type: 'authentication_error',
-                message: 'Invalid or missing API key'
-            }
-        });
+        return sendApiError(
+            res,
+            getApiFormatForRequest(req),
+            401,
+            'authentication_error',
+            'Invalid or missing API key'
+        );
     }
 
     next();
@@ -176,6 +183,68 @@ function parseError(error) {
     }
 
     return { errorType, statusCode, errorMessage };
+}
+
+function getApiFormatForRequest(req) {
+    return req.originalUrl.startsWith('/v1/chat/completions') ? 'openai' : 'anthropic';
+}
+
+function buildErrorPayload(apiFormat, errorType, errorMessage) {
+    if (apiFormat === 'openai') {
+        return buildOpenAIErrorPayload(errorType, errorMessage);
+    }
+
+    return {
+        type: 'error',
+        error: {
+            type: errorType,
+            message: errorMessage
+        }
+    };
+}
+
+function sendApiError(res, apiFormat, statusCode, errorType, errorMessage) {
+    return res.status(statusCode).json(buildErrorPayload(apiFormat, errorType, errorMessage));
+}
+
+function writeApiStreamError(res, apiFormat, errorType, errorMessage) {
+    if (apiFormat === 'openai') {
+        res.write(`data: ${JSON.stringify(buildErrorPayload(apiFormat, errorType, errorMessage))}\n\n`);
+        res.end();
+        return;
+    }
+
+    res.write(`event: error\ndata: ${JSON.stringify(buildErrorPayload(apiFormat, errorType, errorMessage))}\n\n`);
+    res.end();
+}
+
+async function resolveModelId(requestedModel = 'claude-3-5-sonnet-20241022') {
+    let modelId = requestedModel;
+    const modelMapping = config.modelMapping || {};
+
+    if (modelMapping[modelId] && modelMapping[modelId].mapping) {
+        const targetModel = modelMapping[modelId].mapping;
+        logger.info(`[Server] Mapping model ${modelId} -> ${targetModel}`);
+        modelId = targetModel;
+    }
+
+    const { account: validationAccount } = accountManager.selectAccount();
+    if (validationAccount) {
+        const token = await accountManager.getTokenForAccount(validationAccount);
+        const projectId = validationAccount.subscription?.projectId || null;
+        const valid = await isValidModel(modelId, token, projectId);
+
+        if (!valid) {
+            throw new Error(`invalid_request_error: Invalid model: ${modelId}. Use /v1/models to see available models.`);
+        }
+    }
+
+    if (accountManager.isAllRateLimited(modelId)) {
+        logger.warn(`[Server] All accounts rate-limited for ${modelId}. Resetting state for optimistic retry.`);
+        accountManager.resetAllRateLimits();
+    }
+
+    return modelId;
 }
 
 // Request logging middleware
@@ -705,6 +774,8 @@ app.post('/v1/messages/count_tokens', (req, res) => {
  * POST /v1/messages
  */
 app.post('/v1/messages', async (req, res) => {
+    const apiFormat = 'anthropic';
+
     try {
         // Ensure account manager is initialized
         await ensureInitialized();
@@ -723,45 +794,11 @@ app.post('/v1/messages', async (req, res) => {
             temperature
         } = req.body;
 
-        // Resolve model mapping if configured
-        let requestedModel = model || 'claude-3-5-sonnet-20241022';
-        const modelMapping = config.modelMapping || {};
-        if (modelMapping[requestedModel] && modelMapping[requestedModel].mapping) {
-            const targetModel = modelMapping[requestedModel].mapping;
-            logger.info(`[Server] Mapping model ${requestedModel} -> ${targetModel}`);
-            requestedModel = targetModel;
-        }
-
-        const modelId = requestedModel;
-
-        // Validate model ID before processing
-        const { account: validationAccount } = accountManager.selectAccount();
-        if (validationAccount) {
-            const token = await accountManager.getTokenForAccount(validationAccount);
-            const projectId = validationAccount.subscription?.projectId || null;
-            const valid = await isValidModel(modelId, token, projectId);
-
-            if (!valid) {
-                throw new Error(`invalid_request_error: Invalid model: ${modelId}. Use /v1/models to see available models.`);
-            }
-        }
-
-        // Optimistic Retry: If ALL accounts are rate-limited for this model, reset them to force a fresh check.
-        // If we have some available accounts, we try them first.
-        if (accountManager.isAllRateLimited(modelId)) {
-            logger.warn(`[Server] All accounts rate-limited for ${modelId}. Resetting state for optimistic retry.`);
-            accountManager.resetAllRateLimits();
-        }
+        const modelId = await resolveModelId(model || 'claude-3-5-sonnet-20241022');
 
         // Validate required fields
         if (!messages || !Array.isArray(messages)) {
-            return res.status(400).json({
-                type: 'error',
-                error: {
-                    type: 'invalid_request_error',
-                    message: 'messages is required and must be an array'
-                }
-            });
+            return sendApiError(res, apiFormat, 400, 'invalid_request_error', 'messages is required and must be an array');
         }
 
         // Filter out "count" requests (often automated background checks)
@@ -838,26 +875,15 @@ app.post('/v1/messages', async (req, res) => {
                 if (!res.headersSent) {
                     logger.error('[API] Initial stream error:', error);
                     const { errorType, statusCode, errorMessage } = parseError(error);
-                    
-                    return res.status(statusCode).json({
-                        type: 'error',
-                        error: {
-                            type: errorType,
-                            message: errorMessage
-                        }
-                    });
+
+                    return sendApiError(res, apiFormat, statusCode, errorType, errorMessage);
                 }
                 
                 // If headers were already sent (should only happen if error occurs mid-stream),
                 // we have to fallback to SSE error event
                 logger.error('[API] Mid-stream error:', error);
                 const { errorType, errorMessage } = parseError(error);
-
-                res.write(`event: error\ndata: ${JSON.stringify({
-                    type: 'error',
-                    error: { type: errorType, message: errorMessage }
-                })}\n\n`);
-                res.end();
+                writeApiStreamError(res, apiFormat, errorType, errorMessage);
             }
 
         } else {
@@ -889,19 +915,115 @@ app.post('/v1/messages', async (req, res) => {
         // Check if headers have already been sent (for streaming that failed mid-way)
         if (res.headersSent) {
             logger.warn('[API] Headers already sent, writing error as SSE event');
-            res.write(`event: error\ndata: ${JSON.stringify({
-                type: 'error',
-                error: { type: errorType, message: errorMessage }
-            })}\n\n`);
-            res.end();
+            writeApiStreamError(res, apiFormat, errorType, errorMessage);
         } else {
-            res.status(statusCode).json({
-                type: 'error',
-                error: {
-                    type: errorType,
-                    message: errorMessage
+            sendApiError(res, apiFormat, statusCode, errorType, errorMessage);
+        }
+    }
+});
+
+/**
+ * OpenAI-compatible Chat Completions API
+ * POST /v1/chat/completions
+ */
+app.post('/v1/chat/completions', async (req, res) => {
+    const apiFormat = 'openai';
+
+    try {
+        await ensureInitialized();
+
+        const anthropicRequest = convertOpenAIToAnthropic(req.body || {});
+        anthropicRequest.model = await resolveModelId(anthropicRequest.model || 'claude-3-5-sonnet-20241022');
+
+        if (!Array.isArray(req.body?.messages)) {
+            return sendApiError(res, apiFormat, 400, 'invalid_request_error', 'messages is required and must be an array');
+        }
+
+        logger.info(`[API] OpenAI chat completion request for model: ${anthropicRequest.model}, stream: ${!!anthropicRequest.stream}`);
+
+        if (anthropicRequest.stream) {
+            try {
+                const streamState = createOpenAIStreamState({
+                    model: anthropicRequest.model,
+                    includeUsage: req.body?.stream_options?.include_usage === true
+                });
+                const generator = sendMessageStream(anthropicRequest, accountManager, FALLBACK_ENABLED);
+                const firstResult = await generator.next();
+
+                res.status(200);
+                res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+                res.setHeader('Cache-Control', 'no-cache');
+                res.setHeader('Connection', 'keep-alive');
+                res.setHeader('X-Accel-Buffering', 'no');
+                res.flushHeaders();
+
+                if (!firstResult.done) {
+                    const chunks = convertAnthropicStreamEventToOpenAIChunks(firstResult.value, streamState);
+                    for (const chunk of chunks) {
+                        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+                    }
+
+                    if (firstResult.value.type === 'message_stop') {
+                        res.write('data: [DONE]\n\n');
+                        res.end();
+                        return;
+                    }
                 }
-            });
+
+                for await (const event of generator) {
+                    const chunks = convertAnthropicStreamEventToOpenAIChunks(event, streamState);
+                    for (const chunk of chunks) {
+                        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+                    }
+
+                    if (event.type === 'message_stop') {
+                        res.write('data: [DONE]\n\n');
+                        res.end();
+                        return;
+                    }
+
+                    if (res.flush) res.flush();
+                }
+
+                res.write('data: [DONE]\n\n');
+                res.end();
+            } catch (error) {
+                if (!res.headersSent) {
+                    logger.error('[API] Initial OpenAI stream error:', error);
+                    const { errorType, statusCode, errorMessage } = parseError(error);
+                    return sendApiError(res, apiFormat, statusCode, errorType, errorMessage);
+                }
+
+                logger.error('[API] Mid-stream OpenAI error:', error);
+                const { errorType, errorMessage } = parseError(error);
+                writeApiStreamError(res, apiFormat, errorType, errorMessage);
+            }
+        } else {
+            const response = await sendMessage(anthropicRequest, accountManager, FALLBACK_ENABLED);
+            res.json(convertAnthropicToOpenAI(response));
+        }
+    } catch (error) {
+        logger.error('[API] OpenAI chat completion error:', error);
+
+        let { errorType, statusCode, errorMessage } = parseError(error);
+
+        if (errorType === 'authentication_error') {
+            logger.warn('[API] Token might be expired, attempting refresh...');
+            try {
+                accountManager.clearProjectCache();
+                accountManager.clearTokenCache();
+                await forceRefresh();
+                errorMessage = 'Token was expired and has been refreshed. Please retry your request.';
+            } catch {
+                errorMessage = 'Could not refresh token. Make sure Antigravity is running.';
+            }
+        }
+
+        if (res.headersSent) {
+            logger.warn('[API] Headers already sent, writing OpenAI error as SSE data');
+            writeApiStreamError(res, apiFormat, errorType, errorMessage);
+        } else {
+            sendApiError(res, apiFormat, statusCode, errorType, errorMessage);
         }
     }
 });
