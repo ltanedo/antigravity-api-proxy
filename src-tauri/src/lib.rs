@@ -19,6 +19,7 @@ const BUNDLED_BUN_BINARY: &str = "bun.exe";
 #[cfg(not(target_os = "windows"))]
 const BUNDLED_BUN_BINARY: &str = "bun";
 const PROXY_PORT: &str = "8086";
+const HTTPS_PROXY_PORT: &str = "8443";
 const OAUTH_CALLBACK_PORT: &str = "38080";
 const DASHBOARD_URL: &str = "http://127.0.0.1:8086/";
 const TRAY_ID: &str = "antigravity-proxy-tray";
@@ -99,6 +100,7 @@ fn start_proxy(app: &tauri::AppHandle) -> Result<Child> {
         .current_dir(&proxy_dir)
         .arg(proxy_dir.join("src").join("index.js"))
         .env("PORT", PROXY_PORT)
+        .env("HTTPS_PORT", HTTPS_PROXY_PORT)
         .env("HOST", "127.0.0.1")
         .env("OAUTH_CALLBACK_PORT", OAUTH_CALLBACK_PORT)
         .env("HOME", &home_dir)

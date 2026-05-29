@@ -7,6 +7,7 @@ Tray-first Windows packaging work for `antigravity-claude-proxy`, kept in a publ
 - A Tauri system-tray wrapper around the Antigravity proxy.
 - The tray app launches the bundled proxy with a packaged Bun runtime.
 - The proxy serves the dashboard, Anthropic-compatible API, and OpenAI-compatible Chat Completions API on `http://127.0.0.1:8086/`.
+- A dev-only self-signed HTTPS endpoint is also available on `https://localhost:8443/`.
 - The Google OAuth callback listener uses `http://127.0.0.1:38080/oauth-callback`.
 
 ## Repo layout
@@ -22,6 +23,7 @@ Tray-first Windows packaging work for `antigravity-claude-proxy`, kept in a publ
 - Right-click menu includes `Open Dashboard` and `Quit`.
 - On startup, the tray app launches the proxy child with:
   - `PORT=8086`
+  - `HTTPS_PORT=8443`
   - `HOST=127.0.0.1`
   - `OAUTH_CALLBACK_PORT=38080`
   - `ANTIGRAVITY_DISABLE_DB_FALLBACK=true`
@@ -78,12 +80,15 @@ After launching the app, use the local dashboard to authenticate:
 Notes:
 
 - The main dashboard, local Anthropic-compatible API, and local OpenAI-compatible Chat Completions API run on `http://127.0.0.1:8086/`
+- The same routes are exposed over self-signed HTTPS at `https://localhost:8443/`
 - The OAuth callback temporarily listens on `http://127.0.0.1:38080/oauth-callback`
 - `38080` is only used during the auth flow
 
 ## Local API Examples
 
 Once authenticated, the tray app exposes the local proxy on `http://127.0.0.1:8086/`.
+
+For clients that require an HTTPS URL, use `https://localhost:8443/v1`. This certificate is self-signed and is not trusted by Windows or browsers by default. Tools that reject untrusted certificates will still need a trusted local certificate or a trust-bypass setting.
 
 List available models:
 

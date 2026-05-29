@@ -9,9 +9,11 @@ import './utils/proxy.js';
 import app, { accountManager } from './server.js';
 import { DEFAULT_PORT } from './constants.js';
 import { logger } from './utils/logger.js';
+import { getLocalHttpsCredentials } from './utils/https-cert.js';
 import { config } from './config.js';
 import { getStrategyLabel, STRATEGY_NAMES, DEFAULT_STRATEGY } from './account-manager/strategies/index.js';
 import { getPackageVersion } from './utils/helpers.js';
+import https from 'https';
 import path from 'path';
 import os from 'os';
 
@@ -55,6 +57,9 @@ export const FALLBACK_ENABLED = isFallbackEnabled;
 
 const PORT = process.env.PORT || DEFAULT_PORT;
 const HOST = process.env.HOST || '0.0.0.0';
+const HTTPS_PORT = process.env.HTTPS_PORT || config?.httpsPort || 8443;
+const HTTPS_HOST = process.env.HTTPS_HOST || '127.0.0.1';
+const HTTPS_ENABLED = process.env.HTTPS_ENABLED !== 'false';
 
 if (process.env.HOST) {
     logger.info(`[Startup] Using HOST environment variable: ${process.env.HOST}`);
@@ -63,6 +68,7 @@ if (process.env.HOST) {
 // Home directory for account storage
 const HOME_DIR = os.homedir();
 const CONFIG_DIR = path.join(HOME_DIR, '.antigravity-claude-proxy');
+let httpsServer = null;
 
 const server = app.listen(PORT, HOST, () => {
     // Get actual bound address
@@ -122,6 +128,7 @@ const server = app.listen(PORT, HOST, () => {
 ╠══════════════════════════════════════════════════════════════╣
 ║                                                              ║
 ${border}  ${align(`Server and WebUI running at: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`)}${border}
+${HTTPS_ENABLED ? `${border}  ${align(`Self-signed HTTPS endpoint: https://localhost:${HTTPS_PORT}`)}${border}\n` : ''}${HTTPS_ENABLED ? `${border}  ${align(`OpenAI HTTPS base URL: https://localhost:${HTTPS_PORT}/v1`)}${border}\n` : ''}${HTTPS_ENABLED ? `${border}  ${align(`HTTPS cert is self-signed and untrusted by default`)}${border}\n` : ''}${HTTPS_ENABLED ? '' : ''}
 ${border}  ${align(`Bound to: ${boundHost}:${boundPort}`)}${border}
 ${statusSection}║                                                              ║
 ${controlSection}
@@ -159,9 +166,31 @@ ${environmentSection}
     }
 });
 
+if (HTTPS_ENABLED) {
+    (async () => {
+        try {
+            const { cert, key, certPath } = await getLocalHttpsCredentials();
+            httpsServer = https.createServer({ cert, key }, app);
+            httpsServer.on('error', (error) => {
+                logger.warn(`[HTTPS] Self-signed HTTPS listener disabled: ${error.message}`);
+            });
+            httpsServer.listen(HTTPS_PORT, HTTPS_HOST, () => {
+                logger.success(`[HTTPS] Self-signed HTTPS endpoint running at https://localhost:${HTTPS_PORT}`);
+                logger.warn(`[HTTPS] Certificate is self-signed and not trusted by default: ${certPath}`);
+            });
+        } catch (error) {
+            logger.warn(`[HTTPS] Could not start self-signed HTTPS endpoint: ${error.message}`);
+        }
+    })();
+}
+
 // Graceful shutdown
 const shutdown = () => {
     logger.info('Shutting down server...');
+    if (httpsServer) {
+        httpsServer.close();
+    }
+
     server.close(() => {
         logger.success('Server stopped');
         process.exit(0);

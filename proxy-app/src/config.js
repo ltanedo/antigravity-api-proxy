@@ -34,6 +34,7 @@ const DEFAULT_CONFIG = {
     webuiPassword: '',
     debug: false,
     devMode: false,
+    httpsPort: 8443,
     logLevel: 'info',
     maxRetries: 5,
     retryBaseMs: 1000,
