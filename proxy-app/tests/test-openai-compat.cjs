@@ -103,6 +103,27 @@ const assert = require('assert/strict');
     }
 
     {
+        const openAIResponse = convertAnthropicToOpenAI({
+            id: 'msg_gemini_tool_end_turn',
+            model: 'gemini-2.5-flash',
+            content: [{
+                type: 'tool_use',
+                id: 'toolu_2',
+                name: 'report_translation',
+                input: { sum: 18 }
+            }],
+            stop_reason: 'end_turn',
+            usage: {
+                input_tokens: 5,
+                output_tokens: 3
+            }
+        });
+
+        assert.equal(openAIResponse.choices[0].message.tool_calls[0].function.name, 'report_translation');
+        assert.equal(openAIResponse.choices[0].finish_reason, 'tool_calls');
+    }
+
+    {
         const state = createOpenAIStreamState({ model: 'claude-sonnet-4-6-thinking', includeUsage: true });
 
         const startChunks = convertAnthropicStreamEventToOpenAIChunks({
@@ -163,6 +184,33 @@ const assert = require('assert/strict');
             completion_tokens: 5,
             total_tokens: 18
         });
+    }
+
+    {
+        const state = createOpenAIStreamState({ model: 'gemini-2.5-flash' });
+
+        convertAnthropicStreamEventToOpenAIChunks({
+            type: 'content_block_start',
+            index: 0,
+            content_block: {
+                type: 'tool_use',
+                id: 'toolu_stream_2',
+                name: 'report_translation',
+                input: {}
+            }
+        }, state);
+
+        const endChunks = convertAnthropicStreamEventToOpenAIChunks({
+            type: 'message_delta',
+            delta: {
+                stop_reason: 'end_turn'
+            },
+            usage: {
+                output_tokens: 3
+            }
+        }, state);
+
+        assert.equal(endChunks[0].choices[0].finish_reason, 'tool_calls');
     }
 
     console.log('OpenAI compatibility tests passed');

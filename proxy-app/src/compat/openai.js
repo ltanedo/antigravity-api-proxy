@@ -290,9 +290,9 @@ export function convertOpenAIToAnthropic(chatRequest) {
     };
 }
 
-function mapStopReason(stopReason) {
+function mapStopReason(stopReason, { hasToolCalls = false } = {}) {
     if (stopReason === 'max_tokens') return 'length';
-    if (stopReason === 'tool_use') return 'tool_calls';
+    if (stopReason === 'tool_use' || hasToolCalls) return 'tool_calls';
     return 'stop';
 }
 
@@ -338,7 +338,7 @@ export function convertAnthropicToOpenAI(anthropicResponse) {
                 tool_calls: toolCalls,
                 function_call: null
             },
-            finish_reason: mapStopReason(anthropicResponse?.stop_reason),
+            finish_reason: mapStopReason(anthropicResponse?.stop_reason, { hasToolCalls: !!toolCalls }),
             logprobs: null
         }],
         usage: {
@@ -372,6 +372,7 @@ export function createOpenAIStreamState({ model, includeUsage = false } = {}) {
         includeUsage,
         promptTokens: 0,
         completionTokens: 0,
+        hasToolCalls: false,
         toolCallIndexesByBlock: new Map()
     };
 }
@@ -390,6 +391,7 @@ export function convertAnthropicStreamEventToOpenAIChunks(event, state) {
         if (event.content_block?.type === 'tool_use') {
             const toolCallIndex = state.toolCallIndexesByBlock.size;
             state.toolCallIndexesByBlock.set(event.index, toolCallIndex);
+            state.hasToolCalls = true;
 
             return [createChunk(state, {
                 tool_calls: [{
@@ -432,7 +434,7 @@ export function convertAnthropicStreamEventToOpenAIChunks(event, state) {
     if (event.type === 'message_delta') {
         state.completionTokens = event.usage?.output_tokens || 0;
         const chunks = [
-            createChunk(state, {}, mapStopReason(event.delta?.stop_reason))
+            createChunk(state, {}, mapStopReason(event.delta?.stop_reason, { hasToolCalls: state.hasToolCalls }))
         ];
 
         if (state.includeUsage) {

@@ -1,7 +1,7 @@
 {
   "name": "antigravity-proxy-tray",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "scripts": {
     "runtime:stage": "node scripts/stage-bun-runtime.mjs",
