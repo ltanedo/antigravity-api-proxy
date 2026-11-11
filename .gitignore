@@ -20,6 +20,7 @@ metadata.json
 *.pfx
 *.p12
 signing-config.local.json
+antigravity-proxy-*-linux-amd64.tar
 
 # Editor directories and files
 .vscode/*

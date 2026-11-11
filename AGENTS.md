@@ -25,6 +25,18 @@ This is the Tauri tray repo. Branch from main; do not force-push it. Build on Wi
 
 ## Build and signing
 
+The optional Linux container is defined by `Dockerfile` and `compose.yaml`.
+It uses the same proxy source and Bun 1.4.4, a non-root UID 1000, read-only root,
+and a separate named `/data` volume. Only inside the container, `HOST=0.0.0.0`
+allows Docker forwarding; Compose publishes 8086 and 38080 on host loopback.
+Do not change the Windows tray's `HOST=127.0.0.1` or copy its OAuth accounts into
+an image. See `container/README.md` for tests and startup. Azure Authenticode
+signing of the Windows tray does not sign the Linux image.
+`container/wsl.ps1` runs Docker Engine inside Ubuntu WSL2 without Docker Desktop;
+its default host HTTP port is 8087 to preserve a running tray on 8086. The WSL
+installer uses Docker's Ubuntu apt repository. WSL2 must start first; do not
+silently reboot Windows or change unrelated security/virtualization settings.
+
 Node >=22.19, official Bun >=1.4.4, Rust/MSVC and WebView2 are prerequisites.
 Bun 1.3.13 crashes loading better-sqlite3 13; 1.4.4 is verified. `npm ci`
 installs Tauri. `npm run build` copies Bun byte-for-byte, installs production
