@@ -1,0 +1,24 @@
+# Allowlist: never send local profiles, signing material, Windows runtimes,
+# build outputs, .git, or host node_modules to the Docker builder.
+**
+!Dockerfile
+!container/
+!container/entrypoint.sh
+!proxy-app/
+!proxy-app/package.json
+!proxy-app/package-lock.json
+!proxy-app/LICENSE
+!proxy-app/src/
+!proxy-app/src/**
+!proxy-app/public/
+!proxy-app/public/**
+!proxy-app/tests/
+!proxy-app/tests/**
+# Defense in depth for accidentally placed local credentials.
+**/.env*
+**/accounts.json
+**/auth-profiles*
+**/metadata.json
+**/*.pfx
+**/*.p12
+**/signing-config.local.json

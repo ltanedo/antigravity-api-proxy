@@ -34,6 +34,10 @@ probing the Antigravity database. `CREATE_NO_WINDOW` prevents a flashing Bun con
 
 ## Build on Windows
 
+For the optional Linux proxy container, see [container/README.md](container/README.md).
+It serves the same OpenClaw `/v1` endpoint without the Windows tray UI. Quit the
+tray before using the container on port 8086; their account stores are separate.
+
 Prerequisites: Node >=22.19, official Bun >=1.4.4 on PATH, Rust/MSVC build tools,
 and WebView2. Bun 1.3.13 crashes loading better-sqlite3 13.0.3; 1.4.4 is verified.
 End users do not need Node or Bun installed.
