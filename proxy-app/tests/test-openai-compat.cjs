@@ -213,6 +213,48 @@ const assert = require('assert/strict');
         assert.equal(endChunks[0].choices[0].finish_reason, 'tool_calls');
     }
 
+    {
+        const response = convertAnthropicToOpenAI({
+            id: 'msg_reasoning', model: 'gemini-3.1-pro-high',
+            content: [
+                { type: 'thinking', thinking: 'First, ', signature: 'private-signature' },
+                { type: 'thinking', thinking: 'check the sum.' },
+                { type: 'text', text: 'The answer is 4.' },
+                { type: 'tool_use', id: 'toolu_sum', name: 'sum', input: { a: 2, b: 2 } }
+            ],
+            stop_reason: 'tool_use', usage: { input_tokens: 9, output_tokens: 12 }
+        });
+        const message = response.choices[0].message;
+        assert.equal(message.reasoning_content, 'First, check the sum.');
+        assert.equal(message.content, 'The answer is 4.');
+        assert.equal(message.tool_calls[0].function.arguments, '{"a":2,"b":2}');
+        assert.equal(response.choices[0].finish_reason, 'tool_calls');
+        assert.equal(response.usage.total_tokens, 21);
+        assert.equal(JSON.stringify(response).includes('private-signature'), false);
+        assert.equal(Object.hasOwn(convertAnthropicToOpenAI({ content: [{ type: 'text', text: 'Hi' }] }).choices[0].message, 'reasoning_content'), false);
+    }
+
+    {
+        const state = createOpenAIStreamState({ model: 'gemini-3.1-pro-high', includeUsage: true });
+        const convert = event => convertAnthropicStreamEventToOpenAIChunks(event, state);
+        convert({ type: 'message_start', message: { id: 'msg_stream', usage: { input_tokens: 9 } } });
+        // Matches src/cloudcode/sse-streamer.js: thinking_delta uses `thinking`.
+        const thinking = convert({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Check the sum.' } });
+        assert.equal(thinking.length, 1);
+        assert.deepEqual(thinking[0].choices[0].delta, { reasoning_content: 'Check the sum.' });
+        assert.equal(thinking[0].id, 'chatcmpl_stream');
+        assert.deepEqual(convert({ type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: 'private' } }), []);
+        assert.deepEqual(convert({ type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: '4' } })[0].choices[0].delta, { content: '4' });
+        const tool = convert({ type: 'content_block_start', index: 2, content_block: { type: 'tool_use', id: 'toolu_sum', name: 'sum' } });
+        assert.equal(tool[0].choices[0].delta.tool_calls[0].index, 0);
+        const args = convert({ type: 'content_block_delta', index: 2, delta: { type: 'input_json_delta', partial_json: '{"a":2}' } });
+        assert.equal(args[0].choices[0].delta.tool_calls[0].function.arguments, '{"a":2}');
+        const end = convert({ type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 12 } });
+        assert.equal(end[0].choices[0].finish_reason, 'tool_calls');
+        assert.deepEqual(end[1].choices, []);
+        assert.deepEqual(end[1].usage, { prompt_tokens: 9, completion_tokens: 12, total_tokens: 21 });
+    }
+
     console.log('OpenAI compatibility tests passed');
 })().catch((error) => {
     console.error(error);
