@@ -77,7 +77,7 @@ export class AccountManager {
             const { accounts: defaultAccounts, tokenCache } = loadDefaultAccount();
             this.#accounts = defaultAccounts;
             this.#tokenCache = tokenCache;
-        } else if (this.#accounts.length === 0 && disableDbFallback) {
+        } else if (this.#accounts.length === 0) {
             logger.info('[AccountManager] Database fallback disabled; waiting for OAuth accounts.');
         }
 

@@ -15,9 +15,9 @@ import { config } from './config.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 import { forceRefresh } from './auth/token-extractor.js';
-import { REQUEST_BODY_LIMIT } from './constants.js';
+import { REQUEST_BODY_LIMIT, BUILTIN_MODEL_MAPPINGS } from './constants.js';
 import { AccountManager } from './account-manager/index.js';
-import { clearThinkingSignatureCache } from './format/signature-cache.js';
+import { clearAllSignatureCaches } from './format/signature-cache.js';
 import { formatDuration } from './utils/helpers.js';
 import { logger } from './utils/logger.js';
 import usageStats from './modules/usage-stats.js';
@@ -85,6 +85,12 @@ async function ensureInitialized() {
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
+// Express 5 leaves req.body undefined when no body was parsed (Express 4 set {}).
+// Keep the old behavior so handlers can destructure req.body safely.
+app.use((req, res, next) => {
+    if (req.body === undefined) req.body = {};
+    next();
+});
 
 // API Key authentication middleware for /v1/* endpoints
 app.use('/v1', (req, res, next) => {
@@ -105,13 +111,8 @@ app.use('/v1', (req, res, next) => {
 
     if (!providedKey || providedKey !== config.apiKey) {
         logger.warn(`[API] Unauthorized request from ${req.ip}, invalid API key`);
-        return sendApiError(
-            res,
-            getApiFormatForRequest(req),
-            401,
-            'authentication_error',
-            'Invalid or missing API key'
-        );
+        return sendApiError(res, getApiFormatForRequest(req), 401,
+            'authentication_error', 'Invalid or missing API key');
     }
 
     next();
@@ -226,6 +227,8 @@ async function resolveModelId(requestedModel = 'claude-3-5-sonnet-20241022') {
         const targetModel = modelMapping[modelId].mapping;
         logger.info(`[Server] Mapping model ${modelId} -> ${targetModel}`);
         modelId = targetModel;
+    } else if (BUILTIN_MODEL_MAPPINGS[modelId]) {
+        modelId = BUILTIN_MODEL_MAPPINGS[modelId];
     }
 
     const { account: validationAccount } = accountManager.selectAccount();
@@ -286,13 +289,13 @@ app.post('/', (req, res) => {
 });
 
 /**
- * Test endpoint - Clear thinking signature cache
+ * Test endpoint - Clear all signature caches (in-memory + persisted store)
  * Used for testing cold cache scenarios in cross-model tests
  */
 app.post('/test/clear-signature-cache', (req, res) => {
-    clearThinkingSignatureCache();
-    logger.debug('[Test] Cleared thinking signature cache');
-    res.json({ success: true, message: 'Thinking signature cache cleared' });
+    clearAllSignatureCaches();
+    logger.debug('[Test] Cleared all signature caches and removed persisted store');
+    res.json({ success: true, message: 'All signature caches cleared' });
 });
 
 /**
@@ -774,8 +777,6 @@ app.post('/v1/messages/count_tokens', (req, res) => {
  * POST /v1/messages
  */
 app.post('/v1/messages', async (req, res) => {
-    const apiFormat = 'anthropic';
-
     try {
         // Ensure account manager is initialized
         await ensureInitialized();
@@ -794,11 +795,49 @@ app.post('/v1/messages', async (req, res) => {
             temperature
         } = req.body;
 
-        const modelId = await resolveModelId(model || 'claude-3-5-sonnet-20241022');
+        // Resolve model mapping if configured
+        let requestedModel = model || 'claude-3-5-sonnet-20241022';
+        const modelMapping = config.modelMapping || {};
+        if (modelMapping[requestedModel] && modelMapping[requestedModel].mapping) {
+            const targetModel = modelMapping[requestedModel].mapping;
+            logger.info(`[Server] Mapping model ${requestedModel} -> ${targetModel}`);
+            requestedModel = targetModel;
+        } else if (BUILTIN_MODEL_MAPPINGS[requestedModel]) {
+            const targetModel = BUILTIN_MODEL_MAPPINGS[requestedModel];
+            logger.info(`[Server] Built-in mapping model ${requestedModel} -> ${targetModel}`);
+            requestedModel = targetModel;
+        }
+
+        const modelId = requestedModel;
+
+        // Validate model ID before processing
+        const { account: validationAccount } = accountManager.selectAccount();
+        if (validationAccount) {
+            const token = await accountManager.getTokenForAccount(validationAccount);
+            const projectId = validationAccount.subscription?.projectId || null;
+            const valid = await isValidModel(modelId, token, projectId);
+
+            if (!valid) {
+                throw new Error(`invalid_request_error: Invalid model: ${modelId}. Use /v1/models to see available models.`);
+            }
+        }
+
+        // Optimistic Retry: If ALL accounts are rate-limited for this model, reset them to force a fresh check.
+        // If we have some available accounts, we try them first.
+        if (accountManager.isAllRateLimited(modelId)) {
+            logger.warn(`[Server] All accounts rate-limited for ${modelId}. Resetting state for optimistic retry.`);
+            accountManager.resetAllRateLimits();
+        }
 
         // Validate required fields
         if (!messages || !Array.isArray(messages)) {
-            return sendApiError(res, apiFormat, 400, 'invalid_request_error', 'messages is required and must be an array');
+            return res.status(400).json({
+                type: 'error',
+                error: {
+                    type: 'invalid_request_error',
+                    message: 'messages is required and must be an array'
+                }
+            });
         }
 
         // Filter out "count" requests (often automated background checks)
@@ -849,6 +888,7 @@ app.post('/v1/messages', async (req, res) => {
                 const firstResult = await generator.next();
 
                 // If we get here, the stream started successfully.
+                usageStats.track(modelId);
                 res.status(200);
                 res.setHeader('Content-Type', 'text/event-stream');
                 res.setHeader('Cache-Control', 'no-cache');
@@ -876,19 +916,31 @@ app.post('/v1/messages', async (req, res) => {
                     logger.error('[API] Initial stream error:', error);
                     const { errorType, statusCode, errorMessage } = parseError(error);
 
-                    return sendApiError(res, apiFormat, statusCode, errorType, errorMessage);
+                    return res.status(statusCode).json({
+                        type: 'error',
+                        error: {
+                            type: errorType,
+                            message: errorMessage
+                        }
+                    });
                 }
                 
                 // If headers were already sent (should only happen if error occurs mid-stream),
                 // we have to fallback to SSE error event
                 logger.error('[API] Mid-stream error:', error);
                 const { errorType, errorMessage } = parseError(error);
-                writeApiStreamError(res, apiFormat, errorType, errorMessage);
+
+                res.write(`event: error\ndata: ${JSON.stringify({
+                    type: 'error',
+                    error: { type: errorType, message: errorMessage }
+                })}\n\n`);
+                res.end();
             }
 
         } else {
             // Handle non-streaming response
             const response = await sendMessage(request, accountManager, FALLBACK_ENABLED);
+            usageStats.track(response?.model || modelId);
             res.json(response);
         }
 
@@ -915,9 +967,19 @@ app.post('/v1/messages', async (req, res) => {
         // Check if headers have already been sent (for streaming that failed mid-way)
         if (res.headersSent) {
             logger.warn('[API] Headers already sent, writing error as SSE event');
-            writeApiStreamError(res, apiFormat, errorType, errorMessage);
+            res.write(`event: error\ndata: ${JSON.stringify({
+                type: 'error',
+                error: { type: errorType, message: errorMessage }
+            })}\n\n`);
+            res.end();
         } else {
-            sendApiError(res, apiFormat, statusCode, errorType, errorMessage);
+            res.status(statusCode).json({
+                type: 'error',
+                error: {
+                    type: errorType,
+                    message: errorMessage
+                }
+            });
         }
     }
 });
@@ -949,6 +1011,7 @@ app.post('/v1/chat/completions', async (req, res) => {
                 });
                 const generator = sendMessageStream(anthropicRequest, accountManager, FALLBACK_ENABLED);
                 const firstResult = await generator.next();
+                usageStats.track(anthropicRequest.model);
 
                 res.status(200);
                 res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
@@ -1000,6 +1063,7 @@ app.post('/v1/chat/completions', async (req, res) => {
             }
         } else {
             const response = await sendMessage(anthropicRequest, accountManager, FALLBACK_ENABLED);
+            usageStats.track(response?.model || anthropicRequest.model);
             res.json(convertAnthropicToOpenAI(response));
         }
     } catch (error) {
@@ -1028,13 +1092,13 @@ app.post('/v1/chat/completions', async (req, res) => {
     }
 });
 
+usageStats.setupRoutes(app);
+
 /**
  * Catch-all for unsupported endpoints
  */
-usageStats.setupRoutes(app);
-
-app.use('*', (req, res) => {
-    // Log 404s (use originalUrl since wildcard strips req.path)
+app.use((req, res) => {
+    // Log 404s
     if (logger.isDebugEnabled) {
         logger.debug(`[API] 404 Not Found: ${req.method} ${req.originalUrl}`);
     }

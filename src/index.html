@@ -22,7 +22,8 @@
       }
 
       main {
-        width: min(340px, calc(100vw - 32px));
+        box-sizing: border-box;
+        width: min(420px, calc(100vw - 32px));
         padding: 24px;
         border-radius: 18px;
         background: rgba(12, 18, 28, 0.82);
@@ -44,15 +45,52 @@
         font-family: "SFMono-Regular", Consolas, monospace;
         color: #ffd18a;
       }
+      button { padding: 10px 14px; border: 0; border-radius: 8px; cursor: pointer; font: inherit; }
+      button:focus-visible, input:focus-visible { outline: 3px solid #ffd18a; outline-offset: 3px; }
+      .actions { display: flex; gap: 10px; margin: 20px 0; flex-wrap: wrap; }
+      #accounts { background: #ffd18a; color: #10151f; }
+      label { display: flex; align-items: center; gap: 8px; }
+      #status { min-height: 3em; margin-top: 12px; font-size: 0.85rem; }
     </style>
   </head>
   <body>
     <main>
       <h1>Antigravity Proxy Tray</h1>
       <p>
-        This window stays hidden during normal use. The proxy launches in the system tray and serves the
-        dashboard at <code>http://127.0.0.1:8086/</code>.
+        Your local proxy is starting. Open Accounts to connect your Google account.
+        It keeps running in the system tray when you close this window.
       </p>
+      <div class="actions">
+        <button id="accounts" type="button">Open Accounts</button>
+        <button id="hide" type="button">Continue in tray</button>
+      </div>
+      <label><input id="autostart" type="checkbox" disabled /> Start with Windows</label>
+      <p id="status" role="status" aria-live="polite">Left-click the tray icon to open the dashboard. Right-click for settings or Quit.</p>
     </main>
+    <script>
+      const { invoke } = window.__TAURI__.core;
+      const { listen } = window.__TAURI__.event;
+      const checkbox = document.getElementById('autostart');
+      const status = document.getElementById('status');
+      const report = error => { status.textContent = String(error); };
+      document.getElementById('accounts').addEventListener('click', () => invoke('open_accounts').catch(report));
+      document.getElementById('hide').addEventListener('click', () => invoke('hide_welcome').catch(report));
+      checkbox.addEventListener('change', async () => {
+        checkbox.disabled = true;
+        try {
+          await invoke('set_autostart', { enabled: checkbox.checked });
+          status.textContent = checkbox.checked ? 'The tray will start when you sign in to Windows.' : 'Start with Windows is off.';
+        } catch (error) {
+          checkbox.checked = !checkbox.checked;
+          report(error);
+        } finally { checkbox.disabled = false; }
+      });
+      (async () => {
+        await listen('autostart-changed', event => { checkbox.checked = event.payload; });
+        await listen('autostart-error', event => report(event.payload));
+        checkbox.checked = await invoke('autostart_enabled');
+        checkbox.disabled = false;
+      })().catch(report);
+    </script>
   </body>
 </html>

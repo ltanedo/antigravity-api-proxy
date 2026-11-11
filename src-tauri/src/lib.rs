@@ -7,9 +7,9 @@ use std::{
 
 use anyhow::{Context, Result};
 use tauri::{
-    menu::{Menu, MenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, RunEvent,
+    Emitter, Manager, RunEvent, WindowEvent,
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
@@ -23,11 +23,47 @@ const OAUTH_CALLBACK_PORT: &str = "38080";
 const DASHBOARD_URL: &str = "http://127.0.0.1:8086/";
 const TRAY_ID: &str = "antigravity-proxy-tray";
 const OPEN_DASHBOARD_ID: &str = "open-dashboard";
+const AUTOSTART_ID: &str = "start-with-windows";
 const QUIT_ID: &str = "quit";
 
 #[derive(Default)]
 struct ProxyState {
     child: Mutex<Option<Child>>,
+}
+
+struct AutostartMenu(CheckMenuItem<tauri::Wry>);
+
+#[tauri::command]
+fn autostart_enabled(app: tauri::AppHandle) -> Result<bool, String> {
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let autostart = app.autolaunch();
+    if enabled {
+        autostart.enable()
+    } else {
+        autostart.disable()
+    }
+    .map_err(|e| e.to_string())?;
+    app.state::<AutostartMenu>()
+        .0
+        .set_checked(enabled)
+        .map_err(|e| e.to_string())?;
+    app.emit("autostart-changed", enabled)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn open_accounts() -> Result<(), String> {
+    webbrowser::open("http://127.0.0.1:8086/#accounts").map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn hide_welcome(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.hide().map_err(|e| e.to_string())?;
+    window.set_skip_taskbar(true).map_err(|e| e.to_string())
 }
 
 fn proxy_source_dir(app: &tauri::AppHandle) -> PathBuf {
@@ -115,9 +151,12 @@ fn start_proxy(app: &tauri::AppHandle) -> Result<Child> {
         command.creation_flags(CREATE_NO_WINDOW);
     }
 
-    command
-        .spawn()
-        .with_context(|| format!("failed to launch bundled proxy with {}", runtime_path.display()))
+    command.spawn().with_context(|| {
+        format!(
+            "failed to launch bundled proxy with {}",
+            runtime_path.display()
+        )
+    })
 }
 
 fn stop_proxy(app: &tauri::AppHandle) {
@@ -141,7 +180,16 @@ fn build_tray(app: &tauri::AppHandle) -> Result<()> {
     let open_item =
         MenuItem::with_id(app, OPEN_DASHBOARD_ID, "Open Dashboard", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, QUIT_ID, "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open_item, &quit_item])?;
+    let autostart_item = CheckMenuItem::with_id(
+        app,
+        AUTOSTART_ID,
+        "Start with Windows",
+        true,
+        app.autolaunch().is_enabled()?,
+        None::<&str>,
+    )?;
+    let menu = Menu::with_items(app, &[&open_item, &autostart_item, &quit_item])?;
+    app.manage(AutostartMenu(autostart_item));
 
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(
@@ -154,6 +202,17 @@ fn build_tray(app: &tauri::AppHandle) -> Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             OPEN_DASHBOARD_ID => open_dashboard(),
+            AUTOSTART_ID => {
+                let result = autostart_enabled(app.clone())
+                    .and_then(|enabled| set_autostart(app.clone(), !enabled));
+                if let Err(error) = result {
+                    // Native check items toggle before this callback; restore on failure.
+                    if let Ok(enabled) = app.autolaunch().is_enabled() {
+                        let _ = app.state::<AutostartMenu>().0.set_checked(enabled);
+                    }
+                    let _ = app.emit("autostart-error", error);
+                }
+            }
             QUIT_ID => {
                 stop_proxy(app);
                 app.exit(0);
@@ -179,28 +238,45 @@ fn build_tray(app: &tauri::AppHandle) -> Result<()> {
 pub fn run() {
     let app = tauri::Builder::default()
         .manage(ProxyState::default())
+        .invoke_handler(tauri::generate_handler![
+            autostart_enabled,
+            set_autostart,
+            open_accounts,
+            hide_welcome
+        ])
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             None::<Vec<&str>>,
         ))
-        .setup(|app| {
-            if let Some(window) = app.get_webview_window("main") {
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
                 let _ = window.hide();
+                let _ = window.set_skip_taskbar(true);
             }
-
+        })
+        .setup(|app| {
+            // Check before starting the proxy, which may create its accounts file.
+            let first_run = !proxy_home_dir(app.handle())?
+                .join(".config/antigravity-proxy/accounts.json")
+                .is_file();
             build_tray(app.handle())?;
 
-            let autostart = app.autolaunch();
-            if !autostart.is_enabled().unwrap_or(false) {
-                let _ = autostart.enable();
-            }
-
             let proxy = start_proxy(app.handle())?;
-            *app
-                .state::<ProxyState>()
+            *app.state::<ProxyState>()
                 .child
                 .lock()
                 .expect("proxy lock poisoned") = Some(proxy);
+
+            if let Some(window) = app.get_webview_window("main") {
+                window.set_skip_taskbar(!first_run)?;
+                if first_run {
+                    window.show()?;
+                    window.set_focus()?;
+                } else {
+                    window.hide()?;
+                }
+            }
 
             Ok(())
         })

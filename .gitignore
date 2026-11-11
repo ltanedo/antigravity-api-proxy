@@ -16,6 +16,10 @@ proxy-home
 proxy-app/.config
 proxy-app/data
 bundled-runtime/
+metadata.json
+*.pfx
+*.p12
+signing-config.local.json
 
 # Editor directories and files
 .vscode/*

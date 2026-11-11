@@ -6,7 +6,8 @@
 import { homedir, platform, arch } from 'os';
 import { join } from 'path';
 import { config } from './config.js';
-import { generateSmartUserAgent } from './utils/version-detector.js';
+import { generateSmartUserAgent, getClientVersion } from './utils/version-detector.js';
+import { getRegisteredModel } from './cloudcode/model-registry.js';
 
 /**
  * Get the Antigravity database path based on the current platform.
@@ -29,7 +30,7 @@ function getAntigravityDbPath() {
 
 /**
  * Generate platform-specific User-Agent string.
- * @returns {string} User-Agent in format "antigravity/version os/arch"
+ * @returns {string} User-Agent in format "antigravity/hub/version os/arch"
  */
 export function getPlatformUserAgent() {
     return generateSmartUserAgent();
@@ -104,7 +105,7 @@ export const ANTIGRAVITY_HEADERS = {
     'User-Agent': getPlatformUserAgent(),
     'Content-Type': 'application/json',
     'X-Client-Name': 'antigravity',
-    'X-Client-Version': '1.107.0', // Match product.json version
+    'X-Client-Version': getClientVersion(),
     'x-goog-api-client': 'gl-node/18.18.2 fire/0.8.6 grpc/1.10.x' // Simulate Google Node.js client environment
 };
 
@@ -201,8 +202,8 @@ export const STRATEGY_LABELS = {
     'hybrid': 'Hybrid (Smart Distribution)'
 };
 
-// Gemini-specific limits
-export const GEMINI_MAX_OUTPUT_TOKENS = 16384;
+// Gemini-specific limits (Gemini 3.8 / Gemini 4 Argon support up to 65536 output tokens)
+export const GEMINI_MAX_OUTPUT_TOKENS = 65536;
 
 // Gemini signature handling
 // Sentinel value to skip thought signature validation when Claude Code strips the field
@@ -217,6 +218,7 @@ export const MODEL_VALIDATION_CACHE_TTL_MS = 5 * 60 * 1000;
 
 /**
  * Get the model family from model name (dynamic detection, no hardcoded list).
+ * Ids without a family in their name resolve via backend metadata (model-registry.js).
  * @param {string} modelName - The model name from the request
  * @returns {'claude' | 'gemini' | 'unknown'} The model family
  */
@@ -224,7 +226,8 @@ export function getModelFamily(modelName) {
     const lower = (modelName || '').toLowerCase();
     if (lower.includes('claude')) return 'claude';
     if (lower.includes('gemini')) return 'gemini';
-    return 'unknown';
+    // Fall back to the provider reported by the backend (codename model ids)
+    return getRegisteredModel(modelName)?.family || 'unknown';
 }
 
 /**
@@ -242,8 +245,11 @@ export function isThinkingModel(modelName) {
         // Check for gemini-3 or higher (e.g., gemini-3, gemini-3.5, gemini-4, etc.)
         const versionMatch = lower.match(/gemini-(\d+)/);
         if (versionMatch && parseInt(versionMatch[1], 10) >= 3) return true;
+        return false;
     }
-    return false;
+    if (lower.includes('claude')) return false;
+    // Codename ids: trust the backend's supportsThinking flag
+    return getRegisteredModel(modelName)?.supportsThinking === true;
 }
 
 // Google OAuth configuration (from opencode-antigravity-auth)
@@ -279,16 +285,26 @@ export const ANTIGRAVITY_SYSTEM_INSTRUCTION = `You are Antigravity, a powerful a
 export const MODEL_FALLBACK_MAP = {
     'gemini-3.1-pro-high': 'claude-opus-4-6-thinking',
     'gemini-3.1-pro-low': 'claude-sonnet-4-6',
-    'gemini-3-flash': 'claude-sonnet-4-6-thinking',
+    'gemini-3-flash': 'claude-sonnet-4-6',
     'claude-opus-4-6-thinking': 'gemini-3.1-pro-high',
-    'claude-sonnet-4-6-thinking': 'gemini-3-flash',
     'claude-sonnet-4-6': 'gemini-3-flash'
+};
+
+// Built-in model aliases mapped to canonical backend models
+export const BUILTIN_MODEL_MAPPINGS = {
+    'claude-3-5-sonnet-20241022': 'claude-sonnet-4-6',
+    'claude-3-7-sonnet-20250219': 'claude-sonnet-4-6',
+    'claude-opus-5-5': 'claude-opus-4-6-thinking',
+    'claude-sonnet-5-5': 'claude-sonnet-4-6',
+    'claude-haiku-5-5': 'claude-sonnet-4-6',
+    'claude-opus-5': 'claude-opus-4-6-thinking',
+    'claude-sonnet-5': 'claude-sonnet-4-6'
 };
 
 // Default test models for each family (used by test suite)
 export const TEST_MODELS = {
-    claude: 'claude-sonnet-4-6-thinking',
-    gemini: 'gemini-3-flash'
+    claude: 'claude-sonnet-4-6',
+    gemini: 'gemini-3.8-flash-tiered'
 };
 
 // Default Claude CLI presets (used by WebUI settings)
@@ -300,9 +316,9 @@ export const DEFAULT_PRESETS = [
             ANTHROPIC_BASE_URL: 'http://localhost:8080',
             ANTHROPIC_MODEL: 'claude-opus-4-6-thinking',
             ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-4-6-thinking',
-            ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-4-6-thinking',
+            ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-4-6',
             ANTHROPIC_DEFAULT_HAIKU_MODEL: 'claude-sonnet-4-6',
-            CLAUDE_CODE_SUBAGENT_MODEL: 'claude-sonnet-4-6-thinking',
+            CLAUDE_CODE_SUBAGENT_MODEL: 'claude-sonnet-4-6',
             ENABLE_EXPERIMENTAL_MCP_CLI: 'true'
         }
     },
@@ -311,11 +327,11 @@ export const DEFAULT_PRESETS = [
         config: {
             ANTHROPIC_AUTH_TOKEN: 'test',
             ANTHROPIC_BASE_URL: 'http://localhost:8080',
-            ANTHROPIC_MODEL: 'gemini-3.1-pro-high',
-            ANTHROPIC_DEFAULT_OPUS_MODEL: 'gemini-3.1-pro-high',
-            ANTHROPIC_DEFAULT_SONNET_MODEL: 'gemini-3.1-flash',
-            ANTHROPIC_DEFAULT_HAIKU_MODEL: 'gemini-3.1-flash',
-            CLAUDE_CODE_SUBAGENT_MODEL: 'gemini-3.1-flash',
+            ANTHROPIC_MODEL: 'gemini-3.1-pro-low',
+            ANTHROPIC_DEFAULT_OPUS_MODEL: 'gemini-3.1-pro-low',
+            ANTHROPIC_DEFAULT_SONNET_MODEL: 'gemini-3.5-flash-low',
+            ANTHROPIC_DEFAULT_HAIKU_MODEL: 'gemini-3.5-flash-low',
+            CLAUDE_CODE_SUBAGENT_MODEL: 'gemini-3.5-flash-low',
             ENABLE_EXPERIMENTAL_MCP_CLI: 'true'
         }
     }
@@ -517,6 +533,7 @@ export default {
     OAUTH_REDIRECT_URI,
     STRATEGY_LABELS,
     MODEL_FALLBACK_MAP,
+    BUILTIN_MODEL_MAPPINGS,
     TEST_MODELS,
     DEFAULT_PRESETS,
     DEFAULT_SERVER_PRESETS,

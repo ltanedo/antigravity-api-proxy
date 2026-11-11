@@ -37,6 +37,10 @@ const licenseCandidates = [
   path.join(path.dirname(sourceBun), "..", "LICENSE.txt"),
 ];
 const bunVersion = execFileSync(sourceBun, ["--version"], { encoding: "utf8" }).trim();
+const [major, minor, patch] = bunVersion.split('.').map(Number);
+if (!(major > 1 || (major === 1 && (minor > 4 || (minor === 4 && patch >= 4))))) {
+  throw new Error(`Bun >=1.4.4 is required for better-sqlite3 13 on Windows (found ${bunVersion}).`);
+}
 
 rmSync(runtimeDir, { recursive: true, force: true });
 mkdirSync(runtimeDir, { recursive: true });

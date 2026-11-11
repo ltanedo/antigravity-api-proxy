@@ -321,6 +321,8 @@ function extractToolCalls(contentBlocks) {
 export function convertAnthropicToOpenAI(anthropicResponse) {
     const contentBlocks = Array.isArray(anthropicResponse?.content) ? anthropicResponse.content : [];
     const contentText = extractTextContent(contentBlocks);
+    const thinkingBlocks = contentBlocks.filter(block => block?.type === 'thinking' && typeof block.thinking === 'string');
+    const reasoningContent = thinkingBlocks.map(block => block.thinking).join('');
     const toolCalls = extractToolCalls(contentBlocks);
     const promptTokens = anthropicResponse?.usage?.input_tokens || 0;
     const completionTokens = anthropicResponse?.usage?.output_tokens || 0;
@@ -335,6 +337,7 @@ export function convertAnthropicToOpenAI(anthropicResponse) {
             message: {
                 role: 'assistant',
                 content: contentText || null,
+                ...(thinkingBlocks.length > 0 ? { reasoning_content: reasoningContent } : {}),
                 tool_calls: toolCalls,
                 function_call: null
             },
@@ -412,6 +415,10 @@ export function convertAnthropicStreamEventToOpenAIChunks(event, state) {
     if (event.type === 'content_block_delta') {
         if (event.delta?.type === 'text_delta') {
             return [createChunk(state, { content: event.delta.text })];
+        }
+
+        if (event.delta?.type === 'thinking_delta') {
+            return [createChunk(state, { reasoning_content: event.delta.thinking })];
         }
 
         if (event.delta?.type === 'input_json_delta') {
