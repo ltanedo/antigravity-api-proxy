@@ -11,6 +11,58 @@ OAuth callback forwarding. Their old Node/root-user images are not reused.
 
 ## Requirements and startup
 
+### CLI on Windows without Docker Desktop
+
+Use Docker Engine directly in Ubuntu WSL2. The PowerShell wrapper invokes the
+Linux Docker CLI and its Unix socket, so Docker Desktop can stay stopped or be
+absent. It does not expose the engine on a TCP port or switch Windows Docker
+contexts. Engine installation follows
+[Docker's Ubuntu apt instructions](https://docs.docker.com/engine/install/ubuntu/).
+
+First verify `wsl -d Ubuntu --exec uname -r` works. If WSL reports
+`HCS_E_HYPERV_NOT_INSTALLED`, changing container CLIs does not fix the Windows
+hypervisor. On this laptop the firmware and required Windows features are
+enabled, but the hypervisor is not running. In **Administrator PowerShell**,
+inspect `bcdedit /enum`; if `hypervisorlaunchtype` is Off, run:
+
+```powershell
+bcdedit /set hypervisorlaunchtype auto
+```
+
+Save your work and reboot Windows, then verify WSL again. The agent's normal
+session cannot read/change this boot configuration. See
+[Microsoft's WSL troubleshooting](https://learn.microsoft.com/en-us/windows/wsl/troubleshooting).
+If the setting is already Auto, investigate the hypervisor startup error instead
+of assuming the boot setting is the cause. No script here reboots Windows.
+
+From the repository root, using ordinary PowerShell after WSL starts:
+
+```powershell
+.\container\wsl.ps1 Install  # Installs Engine, Buildx and Compose inside Ubuntu
+.\container\wsl.ps1 Test     # Fresh-volume tests; requires the existing host Node
+.\container\wsl.ps1 Up       # Uses 8087 so the Windows tray can remain on 8086
+.\container\wsl.ps1 Status
+.\container\wsl.ps1 Logs
+.\container\wsl.ps1 Stop
+```
+
+The installer uses Linux root via `wsl -u root`, not an elevated Windows shell.
+It refuses to remove conflicting distro packages, leaves existing container
+storage intact, and does not add Windows autostart or change OpenClaw settings.
+The Docker daemon may start with Ubuntu's service manager; the proxy still uses
+`restart: no`. Ubuntu must stay running while the proxy is in use.
+
+The default CLI dashboard is `http://127.0.0.1:8087/#accounts`. For a later switch
+to the existing OpenClaw URL, quit the Windows tray, run `wsl.ps1 Stop`, then
+`wsl.ps1 Up -Port 8086`. Linking accounts in the container remains a separate
+step. The callback still uses port 38080, so do not start tray OAuth concurrently.
+Specify `-Distribution <name>` if your Ubuntu WSL distribution has another name.
+
+CLI support has been syntax-checked; installation and execution remain blocked
+until this laptop's WSL2 hypervisor starts successfully.
+
+### Docker Desktop or another working Docker engine
+
 Use an approved Docker installation with a running Linux engine and Compose v2.
 On Windows, Docker Desktop requires working virtualization/WSL2 or another
 supported backend. Docker Desktop's enterprise licensing also needs review.

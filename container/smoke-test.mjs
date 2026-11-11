@@ -10,8 +10,17 @@ const project = `antigravity-smoke-${randomBytes(5).toString('hex')}`;
 const port = Number(process.env.ANTIGRAVITY_TEST_PORT || 18086);
 assert(Number.isInteger(port) && port > 1024 && port <= 65535, 'Invalid test port');
 const env = { ...process.env, ANTIGRAVITY_HTTP_PORT: String(port) };
+const wslDistro = process.env.ANTIGRAVITY_DOCKER_WSL;
 function docker(args, timeout = 30_000) {
-    return execFileSync('docker', args, {
+    const command = wslDistro ? 'wsl.exe' : 'docker';
+    const commandArgs = wslDistro ? [
+        '-d', wslDistro, '-u', 'root', '--cd', cwd, '--exec',
+        'env', '-u', 'DOCKER_HOST', '-u', 'DOCKER_CONTEXT',
+        '-u', 'DOCKER_TLS_VERIFY', '-u', 'DOCKER_CERT_PATH',
+        `ANTIGRAVITY_HTTP_PORT=${port}`, '/usr/bin/docker',
+        '--host', 'unix:///var/run/docker.sock', ...args,
+    ] : args;
+    return execFileSync(command, commandArgs, {
         cwd, env, encoding: 'utf8', timeout, windowsHide: true,
         maxBuffer: 8 * 1024 * 1024,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -27,7 +36,7 @@ const pause = () => new Promise(resolve => setTimeout(resolve, 100));
 try {
     assert.equal(docker(['info', '--format', '{{.OSType}}'], 15_000), 'linux');
 } catch {
-    console.error('Docker Linux engine unavailable. Start/fix Docker Desktop before running this test.');
+    console.error('Docker Linux engine unavailable. Start/fix your Docker Engine before running this test.');
     process.exit(1);
 }
 compose('config', '--quiet');
