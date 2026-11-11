@@ -20,4 +20,15 @@ const result = spawnSync(process.execPath, [require.resolve('@tauri-apps/cli/tau
   cwd: fileURLToPath(new URL('..', import.meta.url)), env, stdio: 'inherit',
 });
 if (result.error) throw result.error;
-process.exit(result.status ?? 1);
+if (result.status !== 0) process.exit(result.status ?? 1);
+// Tauri restores its original, unsigned executable after bundling. Sign that final
+// release EXE too; the installers already contain the copy signed by signCommand.
+if (process.platform === 'win32' && !unsigned) {
+  const finalSign = spawnSync('powershell.exe', [
+    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+    fileURLToPath(new URL('./sign-windows.ps1', import.meta.url)),
+    fileURLToPath(new URL('../src-tauri/target/release/antigravity-proxy-tray.exe', import.meta.url)),
+  ], { env, stdio: 'inherit' });
+  if (finalSign.error) throw finalSign.error;
+  if (finalSign.status !== 0) process.exit(finalSign.status ?? 1);
+}

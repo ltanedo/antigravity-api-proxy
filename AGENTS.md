@@ -38,6 +38,8 @@ Azure service principal env vars or a logged-in Azure CLI on PATH. Prefer
 `AZURE_SIGNING_DLIB_PATH`. Both use SHA256 and RFC 3161 timestamping at
 `http://timestamp.acs.microsoft.com`. Tauri runs from src-tauri, hence the config
 uses `../scripts/sign-windows.ps1 %1`.
+The build wrapper signs the final release EXE again after bundling because Tauri
+restores its original unsigned executable; do not remove that final signing step.
 
 Default build fails if signing is unavailable. `npm run build:unsigned` is local
 development only; never publish its artifacts. Never commit credentials, auth

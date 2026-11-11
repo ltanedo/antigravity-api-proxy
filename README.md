@@ -74,7 +74,8 @@ Do not create new Azure resources or commit credentials, PFX/P12 or metadata.
 Tauri invokes `../scripts/sign-windows.ps1 %1` from `src-tauri/`. It signs all
 three outputs with SHA256 and an RFC 3161 timestamp from
 `http://timestamp.acs.microsoft.com`, verifies signatures, and prints the signer
-subject without secrets:
+subject without secrets. After bundling, the build wrapper signs the release EXE
+again because Tauri restores its original unsigned executable:
 
 - `src-tauri/target/release/antigravity-proxy-tray.exe`
 - `src-tauri/target/release/bundle/nsis/Antigravity Proxy Tray_0.4.0_x64-setup.exe`
